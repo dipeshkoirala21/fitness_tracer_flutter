@@ -109,6 +109,13 @@ packages:
       url: "https://pub.dartlang.org"
     source: hosted
     version: "1.8.1"
+  pedometer:
+    dependency: "direct main"
+    description:
+      name: pedometer
+      url: "https://pub.dartlang.org"
+    source: hosted
+    version: "3.0.0"
   sky_engine:
     dependency: transitive
     description: flutter
@@ -165,3 +172,4 @@ packages:
     version: "2.1.2"
 sdks:
   dart: ">=2.17.0 <3.0.0"
+  flutter: ">=1.10.0"
