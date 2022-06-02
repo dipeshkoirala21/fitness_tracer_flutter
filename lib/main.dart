@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:pedometer/pedometer.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+import 'atoms/alert_dialog.dart';
 
 void main() {
   runApp(const MyApp());
@@ -37,7 +40,32 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
-    initPlatformState();
+    _checkPermission();
+  }
+
+  Future<void> _checkPermission() async {
+    final status = await Permission.activityRecognition.request();
+    if (status == PermissionStatus.granted) {
+      initPlatformState();
+      print('Permission granted');
+    } else if (status == PermissionStatus.denied) {
+      print(
+          'Permission denied. Show a dialog and again ask for the permission');
+      ShowDialogBox.dialogBoxes(
+        context: context,
+        textOption1: "Yes",
+        textOption2: "No",
+        alertTitle: "Permission Denied",
+        alertMessage:
+            "Your app won't run unless you allow activity recognition permission. Do you want to open Settings to allow it?",
+        onPressYesButton: () {
+          openAppSettings();
+        },
+      );
+    } else if (status == PermissionStatus.permanentlyDenied) {
+      print('Take the user to the settings page.');
+      await openAppSettings();
+    }
   }
 
   void onStepCount(StepCount event) {
