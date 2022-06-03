@@ -10,15 +10,27 @@ import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'atoms/alert_dialog.dart';
-
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeService();
+  _checkPermission();
   runApp(const MyApp());
 }
 
+Future<void> _checkPermission() async {
+  final status = await Permission.activityRecognition.request();
+  if (status == PermissionStatus.granted) {
+    await initializeService();
+    print('Permission granted');
+  } else if (status == PermissionStatus.denied) {
+    print('Permission denied. Show a dialog and again ask for the permission');
+  } else if (status == PermissionStatus.permanentlyDenied) {
+    print('Take the user to the settings page.');
+    await openAppSettings();
+  }
+}
+
 Future<void> initializeService() async {
+  print('initialize service');
   final service = FlutterBackgroundService();
   await service.configure(
     androidConfiguration: AndroidConfiguration(
@@ -53,6 +65,8 @@ bool onIosBackground(ServiceInstance service) {
 }
 
 void onStart(ServiceInstance service) async {
+  late Stream<StepCount> stepCountStream;
+  late Stream<PedestrianStatus> pedestrianStatusStream;
   // Only available for flutter 3.0.0 and later
   DartPluginRegistrant.ensureInitialized();
 
@@ -81,36 +95,41 @@ void onStart(ServiceInstance service) async {
     final hello = preferences.getString("hello");
     print(hello);
 
-    if (service is AndroidServiceInstance) {
-      service.setForegroundNotificationInfo(
-        title: "My App Service",
-        content: "Updated at ${DateTime.now()}",
-      );
-    }
+    pedestrianStatusStream = Pedometer.pedestrianStatusStream;
+    stepCountStream = Pedometer.stepCountStream;
 
     /// you can see this log in logcat
-    print('FLUTTER BACKGROUND SERVICE: ${DateTime.now()}');
+    // print('FLUTTER BACKGROUND SERVICE: ${DateTime.now()}');
 
-    // test using external plugin
-    final deviceInfo = DeviceInfoPlugin();
-    String? device;
-    if (Platform.isAndroid) {
-      final androidInfo = await deviceInfo.androidInfo;
-      device = androidInfo.model;
-    }
+    // // test using external plugin
+    // final deviceInfo = DeviceInfoPlugin();
+    // String? device;
+    // if (Platform.isAndroid) {
+    //   final androidInfo = await deviceInfo.androidInfo;
+    //   device = androidInfo.model;
+    // }
 
-    if (Platform.isIOS) {
-      final iosInfo = await deviceInfo.iosInfo;
-      device = iosInfo.model;
-    }
-
-    service.invoke(
-      'update',
-      {
-        "current_date": DateTime.now().toIso8601String(),
-        "device": device,
-      },
-    );
+    // if (Platform.isIOS) {
+    //   final iosInfo = await deviceInfo.iosInfo;
+    //   device = iosInfo.model;
+    // }
+    stepCountStream.listen((event) {
+      if (service is AndroidServiceInstance) {
+        service.setForegroundNotificationInfo(
+          title: "Total Steps",
+          content: event.steps.toString(),
+        );
+      }
+      service.invoke(
+        'update',
+        {
+          "current_date": DateTime.now().toIso8601String(),
+          "steps": event.steps.toString(),
+        },
+      );
+    }).onError((error) {
+      print(error);
+    });
   });
 }
 
@@ -139,81 +158,12 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  late Stream<StepCount> _stepCountStream;
-  late Stream<PedestrianStatus> _pedestrianStatusStream;
-  String _status = '?', _steps = '?';
-  String text = "Stop Service"; //background services
-
   @override
   void initState() {
     super.initState();
-    _checkPermission();
-  }
-
-  Future<void> _checkPermission() async {
-    final status = await Permission.activityRecognition.request();
-    if (status == PermissionStatus.granted) {
-      initPlatformState();
-      print('Permission granted');
-    } else if (status == PermissionStatus.denied) {
-      print(
-          'Permission denied. Show a dialog and again ask for the permission');
-      ShowDialogBox.dialogBoxes(
-        context: context,
-        textOption1: "Yes",
-        textOption2: "No",
-        alertTitle: "Permission Denied",
-        alertMessage:
-            "Your app won't run unless you allow activity recognition permission. Do you want to open Settings to allow it?",
-        onPressYesButton: () {
-          openAppSettings();
-        },
-      );
-    } else if (status == PermissionStatus.permanentlyDenied) {
-      print('Take the user to the settings page.');
-      await openAppSettings();
-    }
-  }
-
-  void onStepCount(StepCount event) {
-    print(event);
-    setState(() {
-      _steps = event.steps.toString();
-    });
-  }
-
-  void onPedestrianStatusChanged(PedestrianStatus event) {
-    print(event);
-    setState(() {
-      _status = event.status;
-    });
-  }
-
-  void onPedestrianStatusError(error) {
-    print('onPedestrianStatusError: $error');
-    setState(() {
-      _status = 'Pedestrian Status not available';
-    });
-    print(_status);
-  }
-
-  void onStepCountError(error) {
-    print('onStepCountError: $error');
-    setState(() {
-      _steps = 'Step Count not available';
-    });
-  }
-
-  void initPlatformState() {
-    _pedestrianStatusStream = Pedometer.pedestrianStatusStream;
-    _pedestrianStatusStream
-        .listen(onPedestrianStatusChanged)
-        .onError(onPedestrianStatusError);
-
-    _stepCountStream = Pedometer.stepCountStream;
-    _stepCountStream.listen(onStepCount).onError(onStepCountError);
-
-    if (!mounted) return;
+    FlutterBackgroundService().invoke("setAsForeground");
+    // FlutterBackgroundService().invoke("stopService");
+    //  FlutterBackgroundService().invoke("setAsBackground");
   }
 
   @override
@@ -236,80 +186,26 @@ class _MyHomePageState extends State<MyHomePage> {
                 }
 
                 final data = snapshot.data!;
-                String? device = data["device"];
-                DateTime? date = DateTime.tryParse(data["current_date"]);
+                String? steps = data["steps"];
                 return Column(
                   children: [
-                    Text(device ?? 'Unknown'),
-                    Text(date.toString()),
+                    const Text(
+                      'Steps taken:',
+                      style: TextStyle(fontSize: 30),
+                    ),
+                    Text(
+                      steps!,
+                      style: const TextStyle(fontSize: 20),
+                    ),
+                    const Divider(
+                      height: 100,
+                      thickness: 0,
+                      color: Colors.white,
+                    ),
                   ],
                 );
               },
             ),
-            ElevatedButton(
-              child: const Text("Foreground Mode"),
-              onPressed: () {
-                FlutterBackgroundService().invoke("setAsForeground");
-              },
-            ),
-            ElevatedButton(
-              child: const Text("Background Mode"),
-              onPressed: () {
-                FlutterBackgroundService().invoke("setAsBackground");
-              },
-            ),
-            ElevatedButton(
-              child: Text(text),
-              onPressed: () async {
-                final service = FlutterBackgroundService();
-                var isRunning = await service.isRunning();
-                if (isRunning) {
-                  service.invoke("stopService");
-                } else {
-                  service.startService();
-                }
-
-                if (!isRunning) {
-                  text = 'Stop Service';
-                } else {
-                  text = 'Start Service';
-                }
-                setState(() {});
-              },
-            ),
-            const Text(
-              'Steps taken:',
-              style: TextStyle(fontSize: 30),
-            ),
-            Text(
-              _steps,
-              style: const TextStyle(fontSize: 20),
-            ),
-            const Divider(
-              height: 100,
-              thickness: 0,
-              color: Colors.white,
-            ),
-            const Text(
-              'Pedestrian status:',
-              style: TextStyle(fontSize: 30),
-            ),
-            Icon(
-              _status == 'walking'
-                  ? Icons.directions_walk
-                  : _status == 'stopped'
-                      ? Icons.accessibility_new
-                      : Icons.error,
-              size: 100,
-            ),
-            Center(
-              child: Text(
-                _status,
-                style: _status == 'walking' || _status == 'stopped'
-                    ? const TextStyle(fontSize: 30)
-                    : const TextStyle(fontSize: 20, color: Colors.red),
-              ),
-            )
           ],
         ),
       ),
